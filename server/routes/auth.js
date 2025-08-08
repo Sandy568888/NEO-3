@@ -1,204 +1,76 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
-const rateLimit = require('express-rate-limit');
-const { User, AuditLog } = require('../models');
-const logger = require('../utils/logger');
-
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 
-// Rate limiting for login attempts
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
-  message: { success: false, error: 'Too many login attempts, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false
-});
+// For testing purposes - simple user object
+const testUser = {
+  id: 1,
+  username: 'admin',
+  password: 'password', // Plain text for testing
+  email: 'admin@example.com'
+};
 
 // Login route
-router.post('/login', loginLimiter, async (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    console.log('Login attempt:', { username, password }); // Debug log
 
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Username and password are required'
-      });
-    }
+    // Simple check for testing
+    if (username === testUser.username && password === testUser.password) {
+      console.log('Login successful for user:', username);
+      
+      // Create JWT token
+      const token = jwt.sign(
+        { userId: testUser.id, username: testUser.username },
+        'your_jwt_secret', // In production, use process.env.JWT_SECRET
+        { expiresIn: '8h' }
+      );
 
-    // Find user
-    const user = await User.findOne({ where: { username, isActive: true } });
-    
-    if (!user || !(await user.comparePassword(password))) {
-      await AuditLog.create({
-        userId: user ? user.id : null,
-        action: 'login_failed',
-        resource: 'auth',
-        details: { username, reason: user ? 'invalid_password' : 'user_not_found' },
-        ipAddress: req.ip,
-        userAgent: req.get('User-Agent'),
-        success: false,
-        errorMessage: 'Invalid credentials'
-      });
-
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid username or password'
-      });
-    }
-
-    // Update last login
-    await user.update({ lastLogin: new Date() });
-
-    // Generate JWT token
-    const token = jwt.sign(
-      { 
-        userId: user.id, 
-        username: user.username, 
-        role: user.role 
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    // Log successful login
-    await AuditLog.create({
-      userId: user.id,
-      action: 'login_success',
-      resource: 'auth',
-      details: { username },
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-      success: true
-    });
-
-    logger.info(`User ${username} logged in successfully from ${req.ip}`);
-
-    res.json({
-      success: true,
-      data: {
+      return res.json({
         token,
         user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          role: user.role,
-          lastLogin: user.lastLogin
+          id: testUser.id,
+          username: testUser.username,
+          email: testUser.email
         }
-      }
-    });
-
-  } catch (error) {
-    logger.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-});
-
-// Logout route
-router.post('/logout', async (req, res) => {
-  try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    
-    if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      
-      await AuditLog.create({
-        userId: decoded.userId,
-        action: 'logout',
-        resource: 'auth',
-        details: { username: decoded.username },
-        ipAddress: req.ip,
-        userAgent: req.get('User-Agent'),
-        success: true
       });
-
-      logger.info(`User ${decoded.username} logged out`);
     }
 
-    res.json({ success: true, message: 'Logged out successfully' });
+    console.log('Invalid credentials for user:', username);
+    return res.status(401).json({ message: 'Invalid credentials' });
+
   } catch (error) {
-    logger.error('Logout error:', error);
-    res.json({ success: true, message: 'Logged out successfully' });
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Verify token route
-router.get('/verify', async (req, res) => {
+// Get current user
+router.get('/me', (req, res) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ message: 'No token, authorization denied' });
+    }
+
+    const token = authHeader.split(' ')[1];
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
-      });
+      return res.status(401).json({ message: 'No token, authorization denied' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findByPk(decoded.userId, {
-      attributes: ['id', 'username', 'email', 'role', 'lastLogin', 'isActive']
-    });
-
-    if (!user || !user.isActive) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid token or user inactive'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: { user }
-    });
-
-  } catch (error) {
-    logger.error('Token verification error:', error);
-    res.status(401).json({
-      success: false,
-      error: 'Invalid token'
-    });
-  }
-});
-
-// Get current user route
-router.get('/me', async (req, res) => {
-  try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    // Verify token
+    const decoded = jwt.verify(token, 'your_jwt_secret');
     
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
-      });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findByPk(decoded.userId, {
-      attributes: ['id', 'username', 'email', 'role', 'lastLogin', 'isActive']
+    // Return user data (in production, fetch from database)
+    res.json({ 
+      id: testUser.id,
+      username: testUser.username,
+      email: testUser.email
     });
-
-    if (!user || !user.isActive) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid token or user inactive'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: { user }
-    });
-
   } catch (error) {
-    logger.error('Get current user error:', error);
-    res.status(401).json({
-      success: false,
-      error: 'Authentication failed'
-    });
+    console.error('Token verification error:', error);
+    res.status(401).json({ message: 'Token is not valid' });
   }
 });
 

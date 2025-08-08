@@ -1,0 +1,94 @@
+# =================================
+# Build Stage - Client
+# =================================
+FROM node:20-alpine AS client-builder
+
+WORKDIR /app/client
+
+# Copy package files
+COPY client/package*.json ./
+
+# Install dependencies
+RUN npm install --production
+
+# Copy client source
+COPY client/ .
+
+# Build client
+RUN npm run build
+
+# =================================
+# Build Stage - Admin Panel
+# =================================
+FROM node:20-alpine AS admin-builder
+
+WORKDIR /app/admin-panel
+
+# Copy package files
+COPY admin-panel/package*.json ./
+
+# Install dependencies
+RUN npm install --production
+
+# Copy admin source
+COPY admin-panel/ .
+
+# Build admin panel
+RUN npm run build
+
+# =================================
+# Production Stage
+# =================================
+FROM node:20-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    ffmpeg \
+    sox \
+    curl \
+    bash \
+    && rm -rf /var/cache/apk/*
+
+# Create app user and directories
+RUN addgroup -S appuser && adduser -S appuser -G appuser
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install production dependencies
+RUN npm install --production
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy built client and admin panel
+COPY --from=client-builder /app/client/build ./client/build
+COPY --from=admin-builder /app/admin-panel/build ./admin-panel/build
+
+# Copy server files
+COPY server/ ./server/
+COPY config/ ./config/
+COPY .sequelizerc ./
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/logs /app/uploads /app/downloads /app/processed /app/temp /app/overlays /app/credentials
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose ports
+EXPOSE 3000 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+# Start the application
+CMD ["node", "server/index.js"]

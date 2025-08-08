@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   Box,
@@ -17,9 +17,15 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, user } = useAuth();
+
+  // Debug logging
+  useEffect(() => {
+    console.log('Login component - isAuthenticated:', isAuthenticated, 'User:', user);
+  }, [isAuthenticated, user]);
 
   if (isAuthenticated) {
+    console.log('Redirecting to dashboard, user:', user);
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -27,14 +33,21 @@ const Login = () => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    console.log('Login form submitted:', { username });
 
-    const result = await login(username, password);
-    
-    if (!result.success) {
-      setError(result.error);
+    try {
+      const result = await login(username, password);
+      console.log('Login result:', result);
+      
+      if (!result.success) {
+        setError(result.error || 'Login failed. Please try again.');
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   return (
@@ -62,13 +75,13 @@ const Login = () => {
           <Typography variant="body2" color="text.secondary" align="center" mb={3}>
             Advanced Audio Processing System
           </Typography>
-          
+
           {error && (
             <Alert severity="error" sx={{ width: '100%', mb: 2 }}>
               {error}
             </Alert>
           )}
-          
+
           <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1, width: '100%' }}>
             <TextField
               margin="normal"
@@ -106,9 +119,9 @@ const Login = () => {
               {loading ? <CircularProgress size={24} /> : 'Sign In'}
             </Button>
           </Box>
-          
+
           <Typography variant="body2" color="text.secondary" align="center">
-            Default credentials: admin / REMOVED
+            Default credentials: admin / admin
           </Typography>
         </Paper>
       </Container>

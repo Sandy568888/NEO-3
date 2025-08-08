@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  ai-music-uploader:
+    build:
+      context: .
+      dockerfile: Dockerfile.fixed
+    container_name: ai-music-uploader
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-your_openai_api_key}
+      - OPENAI_MODEL=gpt-4
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-your_youtube_api_key}
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-your_youtube_client_id}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-your_youtube_client_secret}
+      - YOUTUBE_REDIRECT_URI=http://localhost:8080/auth/youtube/callback
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - JWT_SECRET=music_uploader_jwt_secret_2025
+      - DOWNLOAD_PATH=/app/downloads
+      - PROCESSED_PATH=/app/processed
+      - UPLOADS_PATH=/app/uploads
+      - TEMP_PATH=/app/temp
+      - DATABASE_URL=sqlite:/app/data/music_uploader.db
+    user: "1000:1000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./downloads:/app/downloads
+      - ./processed:/app/processed
+      - ./temp:/app/temp
+      - ./overlays:/app/overlays
+      - ./credentials:/app/credentials
+      - ./client/build:/app/client/build:ro
+    restart: unless-stopped
+    networks:
+      - ai-music-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-music-redis
+    restart: unless-stopped
+    networks:
+      - ai-music-network
+    volumes:
+      - redis_data:/data
+
+  nginx:
+    image: nginx:alpine
+    container_name: ai-music-nginx
+    ports:
+      - "8080:80"
+      - "4443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl
+      - ./client/build:/app/client/build:ro
+    depends_on:
+      - ai-music-uploader
+    restart: unless-stopped
+    networks:
+      - ai-music-network
+
+volumes:
+  redis_data:
+
+networks:
+  ai-music-network:
+    driver: bridge
